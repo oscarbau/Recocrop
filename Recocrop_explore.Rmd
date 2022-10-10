@@ -1,0 +1,228 @@
+title: "Exploration Recocrop"
+author: "Oscar Bautista"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Ecocrop exploration
+
+Load library
+
+```{r}
+library(Recocrop)
+```
+
+```{r}
+crop.list <-ecocropPars()
+```
+
+Get parameters for a specific crop
+
+```{r}
+x <- ecocropPars("potato")
+potato <- x$parameters
+```
+
+```{r}
+m <- ecocrop()
+crop(m) <- potato
+```
+
+## Plot crop parameters
+
+You can also embed plots, for example:
+
+```{r m}
+plot(m)
+```
+
+Explore the default parameters for each crop
+
+```{r}
+fname <- system.file("parameters/ecocrop.rds", package="Recocrop")
+d <- readRDS(fname)
+head(d)
+```
+
+Add parameter
+
+```{r}
+crop(m) <- cbind(clay=c(0,0,10,20))
+```
+
+Plot parameters and verify the new parameter (Clay) was added
+
+```{r}
+plot(m)
+```
+
+add predictors to tavg variable
+
+```{r}
+dp <- cbind(tavg=c(10,12,14,16,18,20,22,20,18,16,14,12), prec=seq(50,182,12))
+dynamicPredictors(m) <- dp
+staticPredictors(m) <- cbind(clay=12)
+```
+
+Run model with modified parameters, set labels and axes
+
+```{r}
+
+x <- run(m)
+x
+y <- matrix(round(x, 1), nrow=2)
+colnames(y) <- month.abb
+rownames(y) <- c("day1", "day15")
+y
+dates <- as.Date(paste0("2000-", rep(1:12, each=2), "-", rep(c(1,15), 12)))
+```
+
+Plot the suitability curve
+
+```{r, figures-side}
+plot(dates, x, las=1, ylab="suitability", xlab="")
+lines(dates, x, col="red")
+
+```
+
+## Predictors
+
+load the terra library to include the spatial dimension
+
+```{r}
+library(terra)
+```
+
+explore the default spatial parameters in the model
+
+```{r}
+fta <- system.file("ex/ta.tif", package="Recocrop")
+fpr <- system.file("ex/pr.tif", package="Recocrop")
+fph <- system.file("ex/ph.tif", package="Recocrop")
+# monthly average temperature
+ta <- rast(fta)
+# monthly precipitation
+pr <- rast(fpr)
+# pH
+ph <- rast(fph)
+# just for plotting
+preds <- c(mean(ta), sum(pr), ph)
+names(preds) <- c("tavg", "prec", "ph")
+plot(preds)
+```
+
+```{r}
+## make ecocrop model
+crop <- ecocropPars("maize")
+m <- ecocrop(crop)
+control(m, get_max=TRUE)
+# run the model, make sure to match
+# the predictor and parameter names
+mz <- predict(m, tavg=ta, prec=pr, ph=ph, wopt=list(names="maize"))
+plot(mz)
+```
+
+```{r}
+# output by 15 day period
+control(m, get_max=FALSE)
+mz12 <- predict(m, tavg=ta, prec=pr, ph=ph)
+plot(mz12[[14:15]])
+
+```
+
+```{r}
+control(m, lim_fact=TRUE)
+mzlim <- predict(m, tavg=ta, prec=pr+50, ph=ph)
+plot(mzlim[[14]])
+control(m, get_max=TRUE)
+```
+
+Modification of pH parameter
+
+```{r}
+# make the soil more acidic
+ph2 <- ph - 1.25
+control(m, get_max=TRUE)
+mzph <- predict(m, tavg=ta, prec=pr, ph=ph2)
+plot(mzph)
+```
+
+Modify rainfall by adding 30 units/month
+
+```{r}
+# more rainfall
+control(m, get_max=TRUE)
+pr2 <- pr + 30 # for each month
+mzpr <- predict(m, tavg=ta, prec=pr2, ph=ph)
+plot(mzpr)
+```
+
+Plot base and modified models (pH and rainfall)
+
+```{r}
+s <- c(mz, mzph, mzpr)
+names(s) <- c("base", "ph", "prec")
+plot(s)
+```
+
+Parallel plot for two or more crop models
+
+```{r}
+
+crop <- ecocropPars("pearl millet")
+m <- ecocrop(crop)
+control(m, get_max=TRUE)
+pm <- predict(m, prec=pr, tavg=ta, wopt=list(names="Pearl millet"))
+
+crop1name <- "Bean, Common"
+crop1n <- "Bean"
+crop1 <- ecocropPars(crop1name)
+mod.crop1 <- ecocrop(crop1)
+
+#get max value in data series
+control(mod.crop1, get_max=TRUE)
+c1 <- predict(mod.crop1, prec=pr, tavg=ta, wopt=list(names=crop1n))
+
+
+crops <- c(mz, pm, c1)
+plot(crops)
+```
+
+Interactive map
+
+```{r}
+library(leaflet)
+library(raster)
+```
+
+Set visualization colors
+
+```{r}
+pal <- colorNumeric(c("green", "yellow", "red"), values(mz),
+  na.color = "transparent")
+palmzph <- colorNumeric(c("green", "yellow", "red"), values(mzph),
+  na.color = "transparent")
+
+```
+
+Add the maize models (Control and acidic) to an interactive leaflet map
+
+```{r}
+mz.lay <- raster(mz)
+mzph.lay <-raster(mzph)
+leaflet() %>% 
+  addTiles() %>%
+  addRasterImage(mz.lay, colors = pal, opacity = 1, 
+                 group= "control" ) %>%
+  addRasterImage(mzph.lay, colors = palmzph, opacity = 1, 
+                 group= "acidic" ) %>%
+  addLegend(values = seq(from = 0, to = 1, by= 0.1),
+            pal = pal,
+  title = "maize") %>%
+  addLayersControl(overlayGroups = c("control", "acidic"),
+    options = layersControlOptions(collapsed = FALSE))
+```
